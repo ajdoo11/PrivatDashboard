@@ -43,7 +43,7 @@ function importRechnungen() {
 
 function importMessage_(msg) {
   const fromAddr = (msg.getFrom().match(/<([^>]+)>/) || [null, msg.getFrom()])[1].trim().toLowerCase();
-  if (ALLOWED_FROM.length && ALLOWED_FROM.map(function (x) { return x.toLowerCase(); }).indexOf(fromAddr) < 0) {
+  if (ALLOWED_FROM.length && ALLOWED_FROM.map(norm_).indexOf(norm_(fromAddr)) < 0) {
     console.log('Ignoriert (Absender nicht erlaubt): ' + fromAddr);
     return;
   }
@@ -160,6 +160,13 @@ function uploadBlob_(id, blob) {
 // ===== Hilfsfunktionen =====
 function label_() { return GmailApp.getUserLabelByName(LABEL_DONE) || GmailApp.createLabel(LABEL_DONE); }
 function pad_(n) { return ('0' + n).slice(-2); }
+// Gmail ignoriert Punkte und "+zusatz" im Namen: a.b+x@gmail.com == ab@gmail.com
+function norm_(a) {
+  a = String(a).trim().toLowerCase();
+  const p = a.split('@');
+  if (p[1] === 'gmail.com' || p[1] === 'googlemail.com') return p[0].split('+')[0].replace(/\./g, '') + '@gmail.com';
+  return a;
+}
 function ymd_(d) { return Utilities.formatDate(d, 'Europe/Zurich', 'yyyy-MM-dd'); }
 
 /** Zum Testen der Erkennung ohne Mail: im Editor ausführen und Protokoll ansehen. */

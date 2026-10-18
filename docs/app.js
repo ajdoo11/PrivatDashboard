@@ -837,7 +837,7 @@ function billRow(b) {
       ${st === 'offen' ? `<button class="btn sm" style="margin-top:6px" data-a="billPaid" data-id="${b.id}">${ic('check', 14)} bezahlt</button>` : ''}</div></div>`;
 }
 function finBills() {
-  const mail = S.flags.billMail || '', bs = S.bills.slice();
+  const mail = S.flags.billMail || 'zuhause.racuni@gmail.com', bs = S.bills.slice();
   const by = st => bs.filter(b => billStatus(b) === st);
   const pruefen = by('pruefen'), offen = by('offen').sort((a, b) => (a.due || '9').localeCompare(b.due || '9')), bezahlt = by('bezahlt').sort((a, b) => (b.received || '').localeCompare(a.received || '')), ign = by('ignoriert');
   const sumOffen = offen.reduce((a, b) => a + (+b.amount || 0), 0), next = offen.find(b => b.due);
