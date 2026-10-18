@@ -1,5 +1,4 @@
 // Firebase-Anbindung: Auth (E-Mail/Passwort) + Firestore mit Offline-Cache.
-// Die Konfiguration liefert Firebase Hosting automatisch unter /__/firebase/init.json.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail,
@@ -10,14 +9,19 @@ import {
   collection, doc, onSnapshot, writeBatch, getDoc, setDoc, deleteDoc,
 } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
 
-let cfg = null;
-try { const r = await fetch('/__/firebase/init.json', {cache: 'no-store'}); if (r.ok) cfg = await r.json(); } catch (e) { /* offline */ }
-if (!cfg) { try { cfg = JSON.parse(localStorage.getItem('zuhause.fbcfg')); } catch (e) { cfg = null; } }
+// Öffentliche Web-Konfiguration (kein Geheimnis – geschützt wird über Login + Firestore-Regeln)
+const cfg = {
+  apiKey: 'AIzaSyAIhFwr_k45RlYQeTV-Ban1KeWBGu8GaKE',
+  authDomain: 'mein-pdf-plan-manager.firebaseapp.com',
+  projectId: 'mein-pdf-plan-manager',
+  storageBucket: 'mein-pdf-plan-manager.firebasestorage.app',
+  messagingSenderId: '887230417501',
+  appId: '1:887230417501:web:f29b3f1a9b918fa8865bb4',
+};
 
 if (!cfg) {
   window.FB = {error: 'Firebase-Konfiguration nicht gefunden. Die App muss über Firebase Hosting geöffnet werden.'};
 } else {
-  try { localStorage.setItem('zuhause.fbcfg', JSON.stringify(cfg)); } catch (e) {}
   const app = initializeApp(cfg);
   const auth = getAuth(app);
   await setPersistence(auth, browserLocalPersistence);

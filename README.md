@@ -1,22 +1,24 @@
-# PrivatDashboard – Unser Zuhause
+﻿# PrivatDashboard – Unser Zuhause
 
 Private Familien-App (PWA) mit Kalender, Finanzen, Einkauf, Hausbau-Planer und Safe.
 
-- **Web-App:** https://privatdashboard.web.app
+- **Web-App:** https://ajdoo11.github.io/PrivatDashboard/
 - **Backend:** Firebase-Projekt `mein-pdf-plan-manager` (Anzeigename „PrivatDashboard“)
-- **Hosting:** Firebase Hosting, Site `privatdashboard`
+- **Hosting:** GitHub Pages aus dem Ordner `docs/` (alternativ Firebase Hosting, Site `privatdashboard`)
+
+Der Code ist öffentlich, die **Daten nicht**: Sie liegen in Firestore und sind nur für angemeldete, bestätigte und freigeschaltete Konten lesbar. Die Firebase-Web-Konfiguration ist kein Geheimnis – der Schutz erfolgt über Login und Sicherheitsregeln.
 
 ## Aufbau
 
 ```
-public/            Web-App (wird ausgeliefert)
+docs/              Web-App (wird ausgeliefert)
   index.html       Layout + Styles
   app.js           App-Logik (alle Module)
   fb.js            Firebase-Initialisierung (Auth + Firestore)
   sw.js            Service Worker (offline)
   manifest.webmanifest, icons/
 firestore.rules    Sicherheitsregeln der Datenbank
-firebase.json      Hosting inkl. Sicherheits-Header (CSP usw.)
+firebase.json      Firebase Hosting inkl. Sicherheits-Header
 ```
 
 ## Sicherheit
@@ -25,8 +27,7 @@ firebase.json      Hosting inkl. Sicherheits-Header (CSP usw.)
 - Passwortrichtlinie: mind. 12 Zeichen, Gross-/Kleinbuchstaben, Zahl, Sonderzeichen
 - Zugriff auf Daten nur mit **bestätigter E-Mail** und Eintrag in der Freigabeliste `allowlist`
 - Firestore-Regeln: nur bekannte Sammlungen, alles andere gesperrt; Freigabeliste nur über die Konsole änderbar
-- Strenge Content-Security-Policy, kein Einbetten in fremde Seiten (X-Frame-Options/frame-ancestors)
-- Beim Abmelden werden lokale Zwischenspeicher gelöscht
+- Content-Security-Policy, beim Abmelden werden lokale Zwischenspeicher gelöscht
 - Optionale Safe-PIN pro Gerät
 
 ## Neue Person freischalten
@@ -35,8 +36,7 @@ firebase.json      Hosting inkl. Sicherheits-Header (CSP usw.)
 2. Firestore → Daten → Sammlung **`allowlist`** → Dokument mit der **E-Mail in Kleinbuchstaben als Dokument-ID** (Feld z.B. `name`)
 3. Die Person meldet sich an, bestätigt ihre E-Mail und setzt über „Passwort vergessen?“ ein eigenes Passwort.
 
-## Deploy
+## Änderungen veröffentlichen
 
-```bash
-firebase deploy --only hosting,firestore:rules
-```
+Push auf `main` → GitHub Pages aktualisiert die App automatisch nach ca. 1 Minute.
+Firestore-Regeln: in der Firebase-Konsole (Firestore → Regeln) oder `firebase deploy --only firestore:rules`.

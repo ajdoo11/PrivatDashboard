@@ -1,10 +1,10 @@
-{
+﻿{
   "firestore": {
     "rules": "firestore.rules"
   },
   "hosting": {
     "site": "privatdashboard",
-    "public": "public",
+    "public": "docs",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "headers": [
       {
