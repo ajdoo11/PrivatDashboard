@@ -30,7 +30,7 @@ service cloud.firestore {
       allow read, write: if isMember() && col in [
         'members', 'events', 'tasks', 'templates', 'entries', 'goals', 'lists', 'items', 'recipes',
         'units', 'rooms', 'hcosts', 'offers', 'milestones', 'contacts', 'defects', 'hnotes',
-        'files', 'contracts', 'warranties', 'meta', 'blobs'
+        'files', 'contracts', 'warranties', 'bills', 'meta', 'blobs'
       ];
     }
     // Dateiinhalte (in Stücke aufgeteilt, max. ~700 KB pro Stück)

@@ -121,7 +121,7 @@ function blank() {
     lists: [], items: [], recipes: [], meals: {},
     house: {name: 'Unser Haus', budget: null, start: '', moveIn: '', address: '', note: ''},
     units: [], rooms: [], hcosts: [], offers: [], milestones: [], contacts: [], defects: [], hnotes: [],
-    files: [], contracts: [], warranties: [],
+    files: [], contracts: [], warranties: [], bills: [],
   };
 }
 function migrate() {
@@ -471,7 +471,7 @@ function deleteTemplate(id) {
   remove('templates', id);
   S.entries = S.entries.filter(e => !(e.templateId === id && !e.paid && e.month >= cm && !S.months[e.month]?.closed));
 }
-function deleteEntry(id) { remove('entries', id); S.items.forEach(i => { if (i.budgetEntryId === id) i.budgetEntryId = null; }); }
+function deleteEntry(id) { remove('entries', id); S.items.forEach(i => { if (i.budgetEntryId === id) i.budgetEntryId = null; }); (S.bills || []).forEach(b => { if (b.entryId === id) { b.entryId = null; b.status = 'ignoriert'; } }); }
 function syncContract(c) {
   const t = S.templates.find(t => t.contractId === c.id);
   if (!c.inBudget || !(+c.amount)) { if (t) deleteTemplate(t.id); return; }
@@ -520,6 +520,7 @@ function alerts() {
   for (const c of S.contracts) { const i = contractInfo(c); if (i.deadline && i.days >= 0 && i.days <= 60) a.push({lvl: i.days <= 14 ? 'danger' : 'warn', icon: 'alert', t: `${c.name}: kündbar bis ${fmtD(i.deadline)}`, s: `Kündigungsfrist ${inDays(i.days)}`, c: 'contracts', id: c.id}); }
   for (const w of S.warranties) { const e = wEnd(w); if (e) { const d = daysBetween(t, e); if (d >= 0 && d <= 45) a.push({lvl: 'warn', icon: 'shield', t: `Garantie ${w.item} endet ${fmtD(e)}`, s: `noch ${d} Tage – Mängel jetzt melden`, c: 'warranties', id: w.id}); } }
   for (const f of S.files) if (f.expiry) { const d = daysBetween(t, f.expiry); if (d <= 90) a.push({lvl: d < 0 ? 'danger' : 'warn', icon: 'file', t: `${f.name} ${d < 0 ? 'ist abgelaufen' : 'läuft ab'}`, s: `${fmtD(f.expiry)} (${inDays(d)})`, c: 'files', id: f.id}); }
+  for (const b of (S.bills || [])) { const st = billStatus(b); if (st === 'pruefen') a.push({lvl: 'warn', icon: 'receipt', t: `Rechnung ${b.vendor || b.subject || ''}: Betrag prüfen`, s: 'Betrag wurde nicht erkannt', c: 'bills', id: b.id}); else if (st === 'offen' && b.due) { const d = daysBetween(t, b.due); if (d <= 5) a.push({lvl: d < 0 ? 'danger' : 'warn', icon: 'receipt', t: `Rechnung ${b.vendor || ''} ${d < 0 ? 'überfällig' : 'bald fällig'}`, s: `zahlbar bis ${fmtD(b.due)} (${inDays(d)})`, c: 'bills', id: b.id}); } }
   const od = S.tasks.filter(x => !x.done && x.due && x.due < t);
   if (od.length) a.push({lvl: 'danger', icon: 'task', t: `${od.length} Aufgabe${od.length > 1 ? 'n' : ''} überfällig`, s: od.map(x => x.title).slice(0, 3).join(', '), href: '#/cal/aufgaben'});
   const uf = ents(curMonth()).filter(e => e.kind === 'fixed' && !e.paid && e.due && e.due < t);
@@ -600,6 +601,7 @@ function searchHTML(q) {
   S.files.forEach(f => { if ((f.module !== 'safe' || sOk) && hit(f.name, f.tags, f.folder)) add(f.module === 'safe' ? 'safe' : 'house', f.module === 'safe' ? 'safe' : 'house', 'file', f.name, (f.module === 'safe' ? 'Safe · ' + (f.folder || '') : 'Haus · ' + (f.category || '')), 'files', f.id); });
   if (sOk) {
     S.contracts.forEach(c => { if (hit(c.name, c.provider, c.customerNo, c.note)) add('safe', 'safe', 'shield', c.name, 'Vertrag · ' + (c.provider || ''), 'contracts', c.id); });
+    S.bills.forEach(b => { if (hit(b.vendor, b.subject, b.invoiceNo, b.note)) add('fin', 'fin', 'receipt', b.vendor || b.subject, 'Rechnung' + (has(b.amount) ? ' · ' + chf(b.amount) : ''), 'bills', b.id); });
     S.warranties.forEach(w => { if (hit(w.item, w.store, w.serial)) add('safe', 'safe', 'receipt', w.item, 'Garantie', 'warranties', w.id); });
   }
   S.members.forEach(m => { if (hit(m.name, m.notes)) add('settings', 'fam', 'users', m.name, 'Familie', 'members', m.id); });
@@ -681,8 +683,9 @@ views.fin = r => {
   if (tab === 'fix') { body = finFix(); actions = `<button class="icon-btn pri" data-a="templateNew" aria-label="Neu">${ic('plus')}</button>`; }
   else if (tab === 'sparen') { body = finGoals(); actions = `<button class="icon-btn pri" data-a="goalNew" aria-label="Neu">${ic('plus')}</button>`; }
   else if (tab === 'auswertung') body = finStats();
+  else if (tab === 'rechnungen') { body = finBills(); actions = `<button class="btn pri sm" data-a="billNew">${ic('plus', 16)} Rechnung</button>`; }
   else { ensureMonth(ui.finMonth); body = finMonth(); actions = `<button class="btn pri sm" data-a="entryNew">${ic('plus', 16)} Ausgabe</button>`; }
-  return page({title: 'Finanzen', accent: 'fin', mod: 'fin', tab: tab === 'monat' || !r.tab ? 'monat' : tab, tabs: [['monat', 'Monat'], ['fix', 'Fixposten'], ['sparen', 'Sparziele'], ['auswertung', 'Auswertung']], actions, body});
+  return page({title: 'Finanzen', accent: 'fin', mod: 'fin', tab: tab === 'monat' || !r.tab ? 'monat' : tab, tabs: [['monat', 'Monat'], ['rechnungen', 'Rechnungen' + (S.bills.filter(b => ['pruefen', 'offen'].includes(billStatus(b))).length ? ' · ' + S.bills.filter(b => ['pruefen', 'offen'].includes(billStatus(b))).length : '')], ['fix', 'Fixposten'], ['sparen', 'Sparziele'], ['auswertung', 'Auswertung']], actions, body});
 };
 const CAT_IC = {'Wohnen': '🏠', 'Lebensmittel': '🛒', 'Kinder': '🧸', 'Haushalt': '🧴', 'Mobilität': '🚗', 'Versicherungen': '🛡️', 'Gesundheit': '💊', 'Abos & Verträge': '📺', 'Freizeit': '🎉', 'Restaurant': '🍽️', 'Kleidung': '👕', 'Geschenke': '🎁', 'Haus/Bau': '🔨', 'Steuern': '🧾', 'Sonstiges': '📦', 'Lohn': '💼', 'Nebeneinkommen': '💡', 'Kinderzulagen': '👶', 'Sparen': '🐷'};
 const QCATS = ['Lebensmittel', 'Kinder', 'Haushalt', 'Restaurant', 'Freizeit', 'Mobilität', 'Kleidung', 'Gesundheit', 'Geschenke', 'Haus/Bau', 'Sonstiges'];
@@ -701,7 +704,7 @@ function quickEntry() {
 function entryRow(e) {
   const tpl = e.templateId && byId('templates', e.templateId);
   const late = !e.paid && e.due && e.due < today();
-  const badges = (e.source?.type === 'shop' ? ' <span class="badge shop">Einkauf</span>' : '') + (tpl?.contractId ? ' <span class="badge safe">Vertrag</span>' : '') + (e.goalId ? ' <span class="badge fin">Sparziel</span>' : '');
+  const badges = (e.source?.type === 'shop' ? ' <span class="badge shop">Einkauf</span>' : '') + (e.source?.type === 'bill' ? ' <span class="badge warn">Rechnung</span>' : '') + (tpl?.contractId ? ' <span class="badge safe">Vertrag</span>' : '') + (e.goalId ? ' <span class="badge fin">Sparziel</span>' : '');
   const sub = [e.category, e.paid ? (e.paidAt ? (e.kind === 'income' ? 'erhalten ' : 'bezahlt ') + fmtDs(e.paidAt) : 'bezahlt') : e.due ? (late ? 'überfällig seit ' : 'fällig ') + fmtDs(e.due) : 'offen', e.by && mem(e.by) ? mem(e.by).name : ''].filter(Boolean).join(' · ');
   return `<div class="row"><span class="catic">${CAT_IC[e.category] || (e.kind === 'saving' ? '🐷' : '📦')}</span>
     <div class="grow clickable" data-a="edit" data-c="entries" data-id="${e.id}"><div class="t">${esc(e.name)}${badges}</div><div class="s"${late ? ' style="color:var(--danger)"' : ''}>${esc(sub)}</div></div>
@@ -794,6 +797,78 @@ function finStats() {
       <div class="stat"><div class="l">Sparpotenzial</div><div class="v" style="color:var(--fin)">${chf0(Y.i - Y.o)}</div></div><div class="stat"><div class="l">Sparquote</div><div class="v">${pct(Y.i - Y.o, Y.i)} %</div></div></div></div>
     <div class="card"><div class="mnav"><button class="icon-btn" data-a="statMonth" data-n="-1">${ic('left')}</button><b>Ausgaben nach Kategorie · ${MSHORT[+ui.statMonth.slice(5) - 1]} ${ui.statMonth.slice(0, 4)}</b><button class="icon-btn" data-a="statMonth" data-n="1">${ic('right')}</button></div>${catBars(ui.statMonth)}</div>
     <div class="card"><div class="ch"><h3>Monatsauszüge</h3></div>${used.length ? `<table class="tb"><thead><tr><th>Monat</th><th>Ein</th><th>Aus</th><th>Frei</th></tr></thead><tbody>${used.slice().reverse().map(mk => { const t = totals(mk); return `<tr class="clickable" data-a="finGoto" data-m="${mk}"><td>${MSHORT[+mk.slice(5) - 1]} ${mk.slice(2, 4)}${S.months[mk]?.closed ? ' ' + ic('lock', 11).replace('class="ic"', 'class="ic" style="display:inline;vertical-align:-1px"') : ''}</td><td>${chf0(t.income).slice(4)}</td><td>${chf0(t.out).slice(4)}</td><td style="color:${t.free < 0 ? 'var(--danger)' : 'var(--fin)'};font-weight:700">${chf0(t.free).slice(4)}</td></tr>`; }).join('')}</tbody></table>` : '<p class="empty">Noch keine Daten</p>'}</div>`;
+}
+
+// ---------- Rechnungen (Mail-Import + manuell) ----------
+// Rechnungen landen in S.bills (vom Mail-Import-Skript oder manuell erfasst).
+// Jede Rechnung mit Betrag wird automatisch als offene variable Ausgabe im Monat der Fälligkeit eingeplant.
+const billMonth = b => { const d = b.due || b.received || today(); const mk = d.slice(0, 7); return mk < curMonth() ? curMonth() : mk; };
+function billStatus(b) {
+  if (b.status === 'ignoriert') return 'ignoriert';
+  const e = b.entryId && byId('entries', b.entryId);
+  if (e) return e.paid ? 'bezahlt' : 'offen';
+  return has(b.amount) ? 'neu' : 'pruefen';
+}
+function planBill(b) {
+  const id = 'b_' + b.id, existing = byId('entries', id);
+  if (existing && existing.paid) { b.entryId = id; return; }
+  const e = {id, month: billMonth(b), name: b.vendor || b.subject || 'Rechnung', amount: +b.amount, kind: 'variable', category: b.category || 'Sonstiges',
+    paid: false, paidAt: '', due: b.due || '', source: {type: 'bill', billId: b.id}, note: b.invoiceNo ? 'Rechnung ' + b.invoiceNo : (b.subject || ''), by: existing?.by || '', createdAt: existing?.createdAt || Date.now()};
+  if (existing) Object.assign(existing, e); else S.entries.push(e);
+  b.entryId = id; b.status = 'eingeplant';
+}
+function unplanBill(b) { const e = b.entryId && byId('entries', b.entryId); if (e && !e.paid) remove('entries', e.id); if (!e || !e.paid) b.entryId = null; }
+// Neue Rechnungen (z.B. frisch per Mail importiert) automatisch einplanen
+function processBills() {
+  let ch = false;
+  for (const b of S.bills) if (b.status !== 'ignoriert' && has(b.amount) && !b.entryId) { planBill(b); ch = true; }
+  if (ch) save();
+  return ch;
+}
+function billRow(b) {
+  const st = billStatus(b), t = today(), late = b.due && b.due < t && st === 'offen';
+  const badge = {offen: `<span class="badge ${late ? 'danger' : 'warn'}">${late ? 'überfällig' : 'offen'}</span>`, bezahlt: '<span class="badge ok">bezahlt</span>', pruefen: '<span class="badge danger">Betrag prüfen</span>', neu: '<span class="badge">neu</span>', ignoriert: '<span class="badge">ignoriert</span>'}[st];
+  return `<div class="row" style="align-items:flex-start"><span class="catic">${b.source === 'mail' ? '📧' : '🧾'}</span>
+    <div class="grow"><div class="clickable" data-a="edit" data-c="bills" data-id="${b.id}"><div class="t">${esc(b.vendor || b.subject || 'Rechnung')} ${badge}</div>
+      <div class="s"${late ? ' style="color:var(--danger)"' : ''}>${[b.due ? 'fällig ' + fmtD(b.due) : 'ohne Fälligkeit', b.entryId && st !== 'ignoriert' ? 'Budget ' + fmtM(byId('entries', b.entryId)?.month || billMonth(b)) : '', b.invoiceNo ? 'Nr. ' + b.invoiceNo : ''].filter(Boolean).map(esc).join(' · ')}</div>
+      ${b.subject && b.vendor ? `<div class="s">${esc(b.subject)}</div>` : ''}</div>
+      ${attachChips('bills', b.id, 'PDF / Foto anhängen')}</div>
+    <div style="text-align:right">${has(b.amount) ? `<div class="amt">${chf(b.amount)}</div>` : '<div class="amt" style="color:var(--danger)">?</div>'}
+      ${st === 'offen' ? `<button class="btn sm" style="margin-top:6px" data-a="billPaid" data-id="${b.id}">${ic('check', 14)} bezahlt</button>` : ''}</div></div>`;
+}
+function finBills() {
+  const mail = S.flags.billMail || '', bs = S.bills.slice();
+  const by = st => bs.filter(b => billStatus(b) === st);
+  const pruefen = by('pruefen'), offen = by('offen').sort((a, b) => (a.due || '9').localeCompare(b.due || '9')), bezahlt = by('bezahlt').sort((a, b) => (b.received || '').localeCompare(a.received || '')), ign = by('ignoriert');
+  const sumOffen = offen.reduce((a, b) => a + (+b.amount || 0), 0), next = offen.find(b => b.due);
+  return `<div class="card"><div class="ch"><h3>Rechnungs-Eingang</h3><button class="icon-btn sm" data-a="billMailEdit" aria-label="Adresse ändern">${ic('edit', 18)}</button></div>
+      ${mail ? `<p class="small" style="margin:0 0 10px">Rechnungen einfach an <b>${esc(mail)}</b> weiterleiten. Sie erscheinen hier automatisch (ca. alle 10 Minuten) und werden im Monat der Fälligkeit als offene Ausgabe eingeplant.</p>`
+        : `<p class="small muted" style="margin:0 0 10px">Der automatische Mail-Import ist noch nicht eingerichtet. Bis dahin kannst du Rechnungen hier mit Foto oder PDF erfassen.</p>`}
+      <div class="stats"><div class="stat"><div class="l">Offen</div><div class="v">${chf0(sumOffen)}</div></div><div class="stat"><div class="l">Nächste Fälligkeit</div><div class="v" style="font-size:16px">${next ? fmtD(next.due) : '–'}</div></div></div></div>
+    ${pruefen.length ? `<div class="card"><div class="ch"><h3>Bitte prüfen</h3><span class="badge danger">${pruefen.length}</span></div><p class="s" style="margin:-4px 0 6px">Bei diesen Rechnungen konnte kein Betrag erkannt werden – antippen und ergänzen.</p>${pruefen.map(billRow).join('')}</div>` : ''}
+    <div class="card"><div class="ch"><h3>Offen</h3><span class="badge">${offen.length}</span></div>${offen.map(billRow).join('') || '<p class="empty">Keine offenen Rechnungen 🎉</p>'}</div>
+    ${bezahlt.length ? `<div class="card"><div class="ch"><h3>Bezahlt</h3><span class="badge ok">${bezahlt.length}</span></div>${bezahlt.slice(0, 15).map(billRow).join('')}</div>` : ''}
+    ${ign.length ? `<div class="card"><div class="ch"><h3>Ignoriert</h3><span class="badge">${ign.length}</span></div>${ign.slice(0, 10).map(billRow).join('')}</div>` : ''}
+    <div class="hint">${ic('receipt', 16)}<span>Erkannt werden Betrag (CHF), Fälligkeit («zahlbar bis», «innert 30 Tagen»), Rechnungsnummer und IBAN – auch aus PDF-Rechnungen und QR-Einzahlungsscheinen. Die PDFs werden im Safe unter «Belege» abgelegt.</span></div>`;
+}
+function billForm(id) {
+  const b = id ? byId('bills', id) : {source: 'manual', received: today(), category: 'Sonstiges', status: 'neu'};
+  if (!b) return;
+  const cats = [...new Set([...CATS])];
+  form({title: id ? 'Rechnung' : 'Rechnung erfassen', accent: 'fin', data: {...b, ignore: b.status === 'ignoriert'}, fields: [
+    {k: 'vendor', l: 'Von (Firma / Shop)', req: true, ph: 'z.B. Onlineshop'}, {k: 'amount', l: 'Betrag (CHF)', t: 'number', half: true}, {k: 'due', l: 'Zahlbar bis', t: 'date', half: true},
+    {k: 'category', l: 'Kategorie', t: 'select', opt: cats, half: true}, {k: 'invoiceNo', l: 'Rechnungsnummer', half: true},
+    {k: 'iban', l: 'IBAN / QR-IBAN'}, {k: 'note', l: 'Notiz', t: 'textarea', rows: 2},
+    {k: 'ignore', l: 'Ignorieren (nicht ins Budget übernehmen)', t: 'check'}],
+    extra: b.source === 'mail' ? `<div class="hint">${ic('mail', 16)}<span>Per Mail importiert${b.from ? ' von ' + esc(b.from) : ''}${b.received ? ' am ' + fmtD(b.received) : ''}${b.subject ? ' – «' + esc(b.subject) + '»' : ''}</span></div>` : '',
+    attach: {coll: 'bills', label: 'Rechnung als PDF oder Foto', meta: () => ({module: 'safe', folder: 'Belege'})},
+    onSave(v) {
+      const ignore = v.ignore; delete v.ignore;
+      const n = upsert('bills', {...b, ...v, status: ignore ? 'ignoriert' : (b.status === 'ignoriert' ? 'neu' : b.status)});
+      if (ignore || !has(n.amount)) unplanBill(n); else planBill(n);
+      return n;
+    },
+    onDelete: id ? () => { unplanBill(b); remove('bills', id); } : null});
 }
 
 // ---------- Einkauf ----------
@@ -1306,7 +1381,7 @@ const EDIT = {
   events: id => eventForm(id), tasks: taskForm, entries: id => entryForm(id), templates: templateForm, goals: goalForm,
   items: itemForm, recipes: recipeForm, hcosts: id => costForm(id), offers: id => offerForm(id), milestones: milestoneForm,
   defects: id => defectForm(id), contacts: contactForm, hnotes: noteForm, rooms: id => go('#/house/raum/' + id),
-  contracts: contractForm, warranties: warrantyForm, members: memberForm, files: id => A.fileOpen({id}),
+  contracts: contractForm, warranties: warrantyForm, bills: billForm, members: memberForm, files: id => A.fileOpen({id}),
 };
 const SAFE_COLLS = ['contracts', 'warranties'];
 
@@ -1354,6 +1429,11 @@ const A = {
   finGoto(d) { ui.finMonth = d.m; go('#/fin/monat'); },
   statMonth(d) { ui.statMonth = mAdd(ui.statMonth, +d.n); render(); },
   entryNew(d) { entryForm(null, {kind: d.kind || 'variable', month: ui.finMonth}); },
+  billNew() { billForm(null); },
+  billPaid(d) { const b = byId('bills', d.id), e = b && byId('entries', b.entryId); if (e) { e.paid = true; e.paidAt = today(); toast('Als bezahlt markiert'); commit(); } },
+  billMailEdit() { form({title: 'Rechnungs-Eingang', accent: 'fin', data: {mail: S.flags.billMail || ''}, fields: [{k: 'mail', l: 'E-Mail-Adresse für Rechnungen', t: 'email', ph: 'z.B. zuhause.rechnungen@gmail.com'}],
+    extra: `<div class="hint">${ic('mail', 16)}<span>Diese Adresse wird hier nur angezeigt. Den eigentlichen Import erledigt ein kleines Skript in diesem Postfach (Anleitung im GitHub-Repo unter <b>tools/</b>).</span></div>`,
+    onSave(v) { S.flags = {...S.flags, billMail: v.mail.toLowerCase()}; }}); },
   qKind(d) {
     const fm = $('#qentry'), keep = fm ? {a: fm.amount.value, n: fm.name.value} : null;
     ui.qKind = d.k; ui.qCat = d.k === 'income' ? 'Lohn' : 'Lebensmittel'; render();
@@ -1416,9 +1496,9 @@ const A = {
   hFileCat(d) { ui.hFileCat = d.f; render(); },
   houseUpload(d) { pickFiles({module: 'haus', category: ui.hFileCat !== 'Alle' ? ui.hFileCat : (d.room ? 'Foto' : 'Plan'), roomId: d.room || null}); },
   attach(d) {
-    const safe = SAFE_COLLS.includes(d.c);
+    const safe = SAFE_COLLS.includes(d.c) || d.c === 'bills';
     const meta = {link: d.c + ':' + d.id, module: safe ? 'safe' : 'haus'};
-    if (safe) meta.folder = d.c === 'warranties' ? 'Belege' : 'Verträge';
+    if (safe) meta.folder = d.c === 'contracts' ? 'Verträge' : 'Belege';
     else { meta.category = d.c === 'offers' ? 'Dokument' : 'Foto'; const x = byId(d.c, d.id); meta.roomId = x?.roomId || null; }
     pickFiles(meta, {accept: d.c === 'defects' ? 'image/*' : undefined});
   },
@@ -1688,7 +1768,7 @@ function seedFile() {
 var booted = false;
 var cloud = {on: false, user: null, synced: {}, unsubs: [], pendingRender: false, rt: null};
 const HH = 'households/main';
-const SYNC_COLS = ['members', 'events', 'tasks', 'templates', 'entries', 'goals', 'lists', 'items', 'recipes', 'units', 'rooms', 'hcosts', 'offers', 'milestones', 'contacts', 'defects', 'hnotes', 'files', 'contracts', 'warranties'];
+const SYNC_COLS = ['members', 'events', 'tasks', 'templates', 'entries', 'goals', 'lists', 'items', 'recipes', 'units', 'rooms', 'hcosts', 'offers', 'milestones', 'contacts', 'defects', 'hnotes', 'files', 'contracts', 'warranties', 'bills'];
 const META_KEYS = ['months', 'meals', 'house', 'flags'];
 const fb = () => window.FB.fns;
 const loadSettings = () => { try { return JSON.parse(localStorage.getItem(SKEY)) || {}; } catch (e) { return {}; } };
@@ -1718,7 +1798,7 @@ function syncDiff() {
     b.commit().catch(e => { console.error(e); toast('Speichern in der Cloud fehlgeschlagen: ' + (e.code || e.message)); });
   }
 }
-function remoteChanged() { clearTimeout(cloud.rt); cloud.rt = setTimeout(() => { cloud.pendingRender = true; flushRemoteRender(); }, 120); }
+function remoteChanged() { clearTimeout(cloud.rt); cloud.rt = setTimeout(() => { if (booted) processBills(); cloud.pendingRender = true; flushRemoteRender(); }, 120); }
 function flushRemoteRender() {
   if (!booted || !cloud.pendingRender) return;
   const ae = document.activeElement;
@@ -1857,7 +1937,7 @@ function enterApp() {
   $('#nav').style.display = '';
   migrate();
   if (!S.members.some(m => m.email === myEmail())) { const free = adults().find(m => !m.email); if (free && S.members.filter(m => m.email).length === 0) { free.email = myEmail(); S.settings.activeUser = free.id; } }
-  applyTheme(); persist(); render();
+  processBills(); applyTheme(); persist(); render();
 }
 async function cloudLogout() {
   try {
