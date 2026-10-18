@@ -1,0 +1,50 @@
+rules_version = '2';
+
+// PrivatDashboard – Sicherheitsregeln
+// Zugriff NUR für:
+//  1. angemeldete Nutzer mit E-Mail/Passwort,
+//  2. deren E-Mail-Adresse bestätigt ist und
+//  3. die in der Freigabeliste "allowlist" stehen (Dokument-ID = E-Mail in Kleinbuchstaben).
+// Die Freigabeliste kann nur in der Firebase-Konsole bearbeitet werden – nie aus der App.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedInWithPassword() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'password'
+        && request.auth.token.email_verified == true;
+    }
+    function isMember() {
+      return signedInWithPassword()
+        && exists(/databases/$(database)/documents/allowlist/$(request.auth.token.email.lower()));
+    }
+
+    // Jeder darf nur seinen eigenen Freigabe-Eintrag lesen (für die Meldung "Kein Zugriff")
+    match /allowlist/{email} {
+      allow get: if request.auth != null && request.auth.token.email.lower() == email;
+      allow list, create, update, delete: if false;
+    }
+
+    // Haushaltsdaten: nur bekannte Sammlungen
+    match /households/main/{col}/{docId} {
+      allow read, write: if isMember() && col in [
+        'members', 'events', 'tasks', 'templates', 'entries', 'goals', 'lists', 'items', 'recipes',
+        'units', 'rooms', 'hcosts', 'offers', 'milestones', 'contacts', 'defects', 'hnotes',
+        'files', 'contracts', 'warranties', 'meta', 'blobs'
+      ];
+    }
+    // Dateiinhalte (in Stücke aufgeteilt, max. ~700 KB pro Stück)
+    match /households/main/blobs/{fileId}/chunks/{n} {
+      allow read, delete: if isMember();
+      allow create, update: if isMember()
+        && request.resource.data.keys().hasOnly(['d'])
+        && request.resource.data.d is string
+        && request.resource.data.d.size() <= 700000;
+    }
+
+    // Alles andere ist gesperrt
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+.firebase/
+*.log
+.claude/settings.local.json
+backup*.json
+zuhause-backup-*.json
+.claude/
