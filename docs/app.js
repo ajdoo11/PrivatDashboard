@@ -130,8 +130,8 @@ function migrate() {
   S.settings = {...b.settings, ...S.settings};
   S.house = {...b.house, ...S.house};
   if (!S.members.length) S.members = [
-    {id: 'u1', name: 'Ich', role: 'adult', color: COLORS[0]},
-    {id: 'u2', name: 'Partnerin', role: 'adult', color: COLORS[1]},
+    {id: 'u1', name: 'Ajdin', role: 'adult', color: COLORS[0]},
+    {id: 'u2', name: 'Elma', role: 'adult', color: COLORS[1]},
   ];
   if (!byId('members', S.settings.activeUser)) S.settings.activeUser = S.members[0].id;
 }
@@ -566,7 +566,7 @@ views.home = () => {
   return `<div class="pg home" style="--accent:var(--primary);--grad:var(--g-primary)">
     <div class="hero"><div class="hero-card">
       <div class="hero-in"><img class="logo" src="icons/icon-192.png" alt="" onerror="this.style.display='none'"><div class="grow"><div class="hd">${wdLong(t)}, ${fmtD(t)}</div><h1>${greet}, ${esc(u.name)}</h1></div>
-        <button class="avbtn" data-a="switchUser" title="Person wechseln">${avatar(u, 40)}</button></div>
+        <a class="acct" href="#/settings" title="Konto & Einstellungen">${avatar(u, 40)}<span>${esc(u.name)}</span></a></div>
       <div class="hero-chips"><a href="#/cal">${ic('cal', 15)} ${todayEv ? todayEv + ' heute' : 'Heute frei'}</a><a href="#/cal/aufgaben">${ic('task', 15)} ${openTasks} Aufgaben</a><a href="#/shop">${ic('cart', 15)} ${openItems} Einkäufe</a></div>
     </div></div>
     <div class="wrap">
@@ -832,9 +832,9 @@ function billRow(b) {
     <div class="grow"><div class="clickable" data-a="edit" data-c="bills" data-id="${b.id}"><div class="t">${esc(b.vendor || b.subject || 'Rechnung')} ${badge}</div>
       <div class="s"${late ? ' style="color:var(--danger)"' : ''}>${[b.due ? 'fällig ' + fmtD(b.due) : 'ohne Fälligkeit', b.entryId && st !== 'ignoriert' ? 'Budget ' + fmtM(byId('entries', b.entryId)?.month || billMonth(b)) : '', b.invoiceNo ? 'Nr. ' + b.invoiceNo : ''].filter(Boolean).map(esc).join(' · ')}</div>
       ${b.subject && b.vendor ? `<div class="s">${esc(b.subject)}</div>` : ''}</div>
+      ${st === 'offen' || st === 'pruefen' ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${b.iban ? `<button class="btn sm pri" data-a="billQR" data-id="${b.id}" title="Zahlungs-QR-Code">${ic('grid', 14)} QR zum Bezahlen</button>` : ''}${st === 'offen' ? `<button class="btn sm" data-a="billPaid" data-id="${b.id}">${ic('check', 14)} bezahlt</button>` : ''}</div>` : ''}
       ${attachChips('bills', b.id, 'PDF / Foto anhängen')}</div>
-    <div style="text-align:right">${has(b.amount) ? `<div class="amt">${chf(b.amount)}</div>` : '<div class="amt" style="color:var(--danger)">?</div>'}
-      ${st === 'offen' ? `<button class="btn sm" style="margin-top:6px" data-a="billPaid" data-id="${b.id}">${ic('check', 14)} bezahlt</button>` : ''}</div></div>`;
+    <div style="text-align:right">${has(b.amount) ? `<div class="amt">${chf(b.amount)}</div>` : '<div class="amt" style="color:var(--danger)">?</div>'}</div></div>`;
 }
 function finBills() {
   const mail = S.flags.billMail || 'zuhause.racuni@gmail.com', bs = S.bills.slice();
@@ -851,6 +851,59 @@ function finBills() {
     ${ign.length ? `<div class="card"><div class="ch"><h3>Ignoriert</h3><span class="badge">${ign.length}</span></div>${ign.slice(0, 10).map(billRow).join('')}</div>` : ''}
     <div class="hint">${ic('receipt', 16)}<span>Erkannt werden Betrag (CHF), Fälligkeit («zahlbar bis», «innert 30 Tagen»), Rechnungsnummer und IBAN – auch aus PDF-Rechnungen und QR-Einzahlungsscheinen. Die PDFs werden im Safe unter «Belege» abgelegt.</span></div>`;
 }
+// ---------- Schweizer QR-Rechnung (Swiss Payments Code) ----------
+// Erzeugt einen QR-Code, den Banking-Apps scannen können (Konto, Empfänger, Betrag, Referenz).
+const cleanIban = s => String(s || '').replace(/\s/g, '').toUpperCase();
+const isQrIban = iban => { const n = +cleanIban(iban).slice(4, 9); return n >= 30000 && n <= 31999; };
+function qrMissing(b) {
+  const m = [];
+  if (!/^(CH|LI)\d{2}[0-9A-Z]{17}$/.test(cleanIban(b.iban))) m.push('IBAN');
+  if (!b.cName) m.push('Empfänger');
+  if (!b.cZip || !b.cCity) m.push('PLZ/Ort des Empfängers');
+  if (isQrIban(b.iban) && String(b.reference || '').replace(/\s/g, '').length !== 27) m.push('QR-Referenz (27 Ziffern)');
+  return m;
+}
+function spcPayload(b) {
+  const ref = String(b.reference || '').replace(/\s/g, '');
+  const refType = isQrIban(b.iban) ? 'QRR' : /^RF\d{2}/i.test(ref) ? 'SCOR' : 'NON';
+  const t = s => String(s || '').replace(/[\r\n]+/g, ' ').trim();
+  const msg = [b.invoiceNo ? 'Rechnung ' + b.invoiceNo : '', refType === 'NON' && ref ? ref : ''].filter(Boolean).join(' ').slice(0, 140);
+  return ['SPC', '0200', '1', cleanIban(b.iban),
+    'S', t(b.cName).slice(0, 70), t(b.cStreet).slice(0, 70), t(b.cHouse).slice(0, 16), t(b.cZip).slice(0, 16), t(b.cCity).slice(0, 35), (t(b.cCountry) || 'CH').toUpperCase().slice(0, 2),
+    '', '', '', '', '', '', '',
+    has(b.amount) ? (+b.amount).toFixed(2) : '', 'CHF',
+    '', '', '', '', '', '', '',
+    refType, refType === 'NON' ? '' : ref.toUpperCase(),
+    msg, 'EPD'].join('\r\n');
+}
+function qrSvg(text) {
+  if (typeof qrcode !== 'function') return '';
+  const q = qrcode(0, 'M'); q.addData(text, 'Byte'); q.make();
+  const n = q.getModuleCount(); let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) d += `M${c} ${r}h1v1h-1z`;
+  // Schweizerkreuz in der Mitte (7×7 mm bei 46×46 mm)
+  const s = n * 7 / 46, o = (n - s) / 2, k = s / 7;
+  return `<svg viewBox="-2 -2 ${n + 4} ${n + 4}" class="qrsvg" role="img" aria-label="QR-Rechnung" shape-rendering="crispEdges"><rect x="-2" y="-2" width="${n + 4}" height="${n + 4}" fill="#fff"/><path d="${d}" fill="#000"/>
+    <rect x="${o - k * .4}" y="${o - k * .4}" width="${s + k * .8}" height="${s + k * .8}" fill="#fff"/><rect x="${o}" y="${o}" width="${s}" height="${s}" fill="#000"/>
+    <rect x="${o + 3 * k}" y="${o + 1.5 * k}" width="${k}" height="${4 * k}" fill="#fff"/><rect x="${o + 1.5 * k}" y="${o + 3 * k}" width="${4 * k}" height="${k}" fill="#fff"/></svg>`;
+}
+const fmtIban = i => cleanIban(i).replace(/(.{4})/g, '$1 ').trim();
+const fmtRef = r => { r = String(r || '').replace(/\s/g, ''); return r.length === 27 ? r.slice(0, 2) + ' ' + r.slice(2).replace(/(.{5})/g, '$1 ').trim() : r.replace(/(.{4})/g, '$1 ').trim(); };
+function billQR(id) {
+  const b = byId('bills', id); if (!b) return;
+  const miss = qrMissing(b);
+  const row = (l, v, copy) => v ? `<div class="row"><div class="grow"><div class="s">${l}</div><div class="t" style="white-space:normal;word-break:break-word">${esc(v)}</div></div>${copy ? `<button class="icon-btn sm" data-a="copy" data-v="${esc(copy)}" aria-label="Kopieren">${ic('file', 17)}</button>` : ''}</div>` : '';
+  modal(`<div class="mh"><h3>Bezahlen: ${esc(b.vendor || b.subject || 'Rechnung')}</h3><button class="icon-btn" data-close>${ic('x')}</button></div>
+    ${miss.length ? `<div class="hint" style="margin-bottom:12px">${ic('alert', 16)}<span>Für den QR-Code fehlt noch: <b>${esc(miss.join(', '))}</b>. Ergänze die Angaben in der Rechnung.</span></div>`
+      : `<div class="qrbox">${qrSvg(spcPayload(b))}</div><p class="s" style="text-align:center;margin:8px 0 12px">Mit der Banking-App scannen (Zahlung erfassen → QR-Code scannen)</p>`}
+    ${row('Betrag', has(b.amount) ? chf(b.amount) : '', has(b.amount) ? (+b.amount).toFixed(2) : '')}
+    ${row('Konto / Zahlbar an', fmtIban(b.iban), cleanIban(b.iban))}
+    ${row('Empfänger', [b.cName, [b.cStreet, b.cHouse].filter(Boolean).join(' '), [b.cZip, b.cCity].filter(Boolean).join(' ')].filter(Boolean).join(', '), b.cName || '')}
+    ${row('Referenz', fmtRef(b.reference), String(b.reference || '').replace(/\s/g, ''))}
+    ${row('Zahlbar bis', b.due ? fmtD(b.due) : '', '')}
+    <div class="mf"><button class="btn" data-a="billEditFromQR" data-id="${b.id}">${ic('edit', 16)} Angaben bearbeiten</button><span class="sp"></span>${billStatus(b) === 'offen' ? `<button class="btn pri" data-a="billPaid" data-id="${b.id}">${ic('check', 16)} Als bezahlt markieren</button>` : ''}</div>`, {accent: 'fin'});
+}
+
 function billForm(id) {
   const b = id ? byId('bills', id) : {source: 'manual', received: today(), category: 'Sonstiges', status: 'neu'};
   if (!b) return;
@@ -858,7 +911,11 @@ function billForm(id) {
   form({title: id ? 'Rechnung' : 'Rechnung erfassen', accent: 'fin', data: {...b, ignore: b.status === 'ignoriert'}, fields: [
     {k: 'vendor', l: 'Von (Firma / Shop)', req: true, ph: 'z.B. Onlineshop'}, {k: 'amount', l: 'Betrag (CHF)', t: 'number', half: true}, {k: 'due', l: 'Zahlbar bis', t: 'date', half: true},
     {k: 'category', l: 'Kategorie', t: 'select', opt: cats, half: true}, {k: 'invoiceNo', l: 'Rechnungsnummer', half: true},
-    {k: 'iban', l: 'IBAN / QR-IBAN'}, {k: 'note', l: 'Notiz', t: 'textarea', rows: 2},
+    {k: 'iban', l: 'IBAN / QR-IBAN', ph: 'CH..'}, {k: 'reference', l: 'Referenz (QR/RF)', ph: 'optional'},
+    {t: 'html', html: '<div class="s" style="margin-top:2px">Empfänger (für den Zahlungs-QR-Code)</div>'},
+    {k: 'cName', l: 'Name / Firma'}, {k: 'cStreet', l: 'Strasse', half: true}, {k: 'cHouse', l: 'Nr.', half: true},
+    {k: 'cZip', l: 'PLZ', half: true}, {k: 'cCity', l: 'Ort', half: true},
+    {k: 'note', l: 'Notiz', t: 'textarea', rows: 2},
     {k: 'ignore', l: 'Ignorieren (nicht ins Budget übernehmen)', t: 'check'}],
     extra: b.source === 'mail' ? `<div class="hint">${ic('mail', 16)}<span>Per Mail importiert${b.from ? ' von ' + esc(b.from) : ''}${b.received ? ' am ' + fmtD(b.received) : ''}${b.subject ? ' – «' + esc(b.subject) + '»' : ''}</span></div>` : '',
     attach: {coll: 'bills', label: 'Rechnung als PDF oder Foto', meta: () => ({module: 'safe', folder: 'Belege'})},
@@ -1430,6 +1487,9 @@ const A = {
   statMonth(d) { ui.statMonth = mAdd(ui.statMonth, +d.n); render(); },
   entryNew(d) { entryForm(null, {kind: d.kind || 'variable', month: ui.finMonth}); },
   billNew() { billForm(null); },
+  billQR(d) { billQR(d.id); },
+  billEditFromQR(d) { closeModal(); billForm(d.id); },
+  async copy(d) { try { await navigator.clipboard.writeText(d.v); toast('Kopiert'); } catch (e) { toast(d.v); } },
   billPaid(d) { const b = byId('bills', d.id), e = b && byId('entries', b.entryId); if (e) { e.paid = true; e.paidAt = today(); toast('Als bezahlt markiert'); commit(); } },
   billMailEdit() { form({title: 'Rechnungs-Eingang', accent: 'fin', data: {mail: S.flags.billMail || ''}, fields: [{k: 'mail', l: 'E-Mail-Adresse für Rechnungen', t: 'email', ph: 'z.B. zuhause.rechnungen@gmail.com'}],
     extra: `<div class="hint">${ic('mail', 16)}<span>Diese Adresse wird hier nur angezeigt. Den eigentlichen Import erledigt ein kleines Skript in diesem Postfach (Anleitung im GitHub-Repo unter <b>tools/</b>).</span></div>`,
@@ -1620,7 +1680,7 @@ document.addEventListener('click', e => {
   const el = e.target.closest('[data-a]'); if (!el) return;
   const fn = A[el.dataset.a]; if (!fn) return;
   e.preventDefault();
-  if (el.closest('#modal') && !['fileDel', 'fileEdit', 'attachDel', 'qEvent', 'qTask', 'qExpense', 'qItem', 'qDefect', 'qDoc'].includes(el.dataset.a)) closeModal();
+  if (el.closest('#modal') && !['fileDel', 'fileEdit', 'attachDel', 'copy', 'qEvent', 'qTask', 'qExpense', 'qItem', 'qDefect', 'qDoc'].includes(el.dataset.a)) closeModal();
   fn({...el.dataset}, el, e);
 });
 document.addEventListener('submit', e => { const fm = e.target.closest('form[data-f]'); if (!fm) return; e.preventDefault(); F[fm.dataset.f] && F[fm.dataset.f](fm); });
@@ -1648,8 +1708,8 @@ function seed() {
   const t = today(), cm = curMonth(), y = +t.slice(0, 4), past = mAdd(cm, -3);
   const kb = addDays(t, 11), pb = addDays(t, 38);
   S.members = [
-    {id: 'u1', name: 'Ich', role: 'adult', color: COLORS[0], birthday: ''},
-    {id: 'u2', name: 'Partnerin', role: 'adult', color: COLORS[1], birthday: (y - 33) + pb.slice(4)},
+    {id: 'u1', name: 'Ajdin', role: 'adult', color: COLORS[0], birthday: ''},
+    {id: 'u2', name: 'Elma', role: 'adult', color: COLORS[1], birthday: (y - 33) + pb.slice(4)},
     {id: 'k1', name: 'Kind 1', role: 'kind', color: COLORS[2], birthday: (y - 6) + kb.slice(4), notes: 'Kleider 116/122 · Schuhe 30'},
   ];
   S.settings = {...S.settings, activeUser: 'u1', demo: true};
@@ -1936,7 +1996,8 @@ function enterApp() {
   booted = true;
   $('#nav').style.display = '';
   migrate();
-  if (!S.members.some(m => m.email === myEmail())) { const free = adults().find(m => !m.email); if (free && S.members.filter(m => m.email).length === 0) { free.email = myEmail(); S.settings.activeUser = free.id; } }
+  const ren = {Ich: 'Ajdin', Partnerin: 'Elma'}; S.members.forEach(m => { if (ren[m.name] && (m.id === 'u1' || m.id === 'u2')) m.name = ren[m.name]; });
+  if (!S.members.some(m => m.email === myEmail())) { const free = adults().find(m => !m.email); if (free) { free.email = myEmail(); S.settings.activeUser = free.id; } }
   processBills(); applyTheme(); persist(); render();
 }
 async function cloudLogout() {
@@ -1968,7 +2029,7 @@ Object.assign(A, {
   recheck() { const u = FB.auth.currentUser; if (u) afterLogin(u); },
   async logout0() { await cloudLogout(); },
   setupBlank() {
-    S.members = [{id: 'u1', name: 'Ich', role: 'adult', color: COLORS[0], email: myEmail()}, {id: 'u2', name: 'Partnerin', role: 'adult', color: COLORS[1]}];
+    S.members = [{id: 'u1', name: 'Ajdin', role: 'adult', color: COLORS[0], email: myEmail()}, {id: 'u2', name: 'Elma', role: 'adult', color: COLORS[1]}];
     S.lists = [{id: uid(), name: 'Lebensmittel', category: 'Lebensmittel'}, {id: uid(), name: 'Kinder', category: 'Kinder'}, {id: uid(), name: 'Drogerie', category: 'Haushalt'}];
     S.settings.activeUser = 'u1'; S.flags = {demo: false};
     enterApp(); toast('Willkommen! Passe unter «Familie» die Namen an.'); go('#/settings');

@@ -1,7 +1,7 @@
 ﻿// Service Worker: Network-first, bei fehlendem Netz aus dem Cache (offline nutzbar).
 // Firebase-/Google-Anfragen (andere Herkunft) werden nicht angefasst.
-const CACHE = 'zuhause-v4';
-const ASSETS = ['./', './index.html', './app.js', './fb.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
+const CACHE = 'zuhause-v5';
+const ASSETS = ['./', './index.html', './app.js', './fb.js', './vendor/qrcode.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

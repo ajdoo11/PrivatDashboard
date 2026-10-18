@@ -65,7 +65,8 @@ function importMessage_(msg) {
   const p = parse_(text, msg.getDate());
   put_('bills/' + id, {
     id: id, source: 'mail', from: fromAddr, vendor: vendor_(msg.getFrom(), body), subject: msg.getSubject(),
-    received: ymd_(msg.getDate()), amount: p.amount, due: p.due, invoiceNo: p.invoiceNo, iban: p.iban,
+    received: ymd_(msg.getDate()), amount: p.amount, due: p.due, invoiceNo: p.invoiceNo, iban: p.iban, reference: p.reference,
+    cName: p.cName, cStreet: p.cStreet, cHouse: p.cHouse, cZip: p.cZip, cCity: p.cCity, cCountry: 'CH',
     status: 'neu', category: 'Sonstiges', note: '', createdAt: Date.now(),
   });
   console.log('Importiert: ' + msg.getSubject() + ' → ' + p.amount + ' CHF, fällig ' + p.due);
@@ -99,9 +100,32 @@ function parse_(text, date) {
     const nd = t.match(/innert\s+(\d{1,3})\s+tag/i) || t.match(/(\d{1,3})\s+tage?\s+netto/i) || t.match(/zahlbar\s+(?:in|innerhalb)\s+(\d{1,3})\s+tag/i);
     if (nd) { const d = new Date(date); d.setDate(d.getDate() + Number(nd[1])); due = ymd_(d); }
   }
-  const ibanM = t.match(/\bCH\d{2}(?:\s?[0-9A-Z]{4}){4}\s?[0-9A-Z]\b/);
+  const ibanM = t.match(/\b(?:CH|LI)\d{2}(?:\s?[0-9A-Z]{4}){4}\s?[0-9A-Z]\b/);
   const invM = t.match(/(rechnungs?\s?(?:-?nr\.?|nummer)|invoice (?:no\.?|number)|bestell(?:nummer|-?nr\.?))\s*[:#]?\s*([A-Z0-9][A-Z0-9\-\/]{3,})/i);
-  return {amount: best, due: due, iban: ibanM ? ibanM[0].replace(/\s/g, '') : '', invoiceNo: invM ? invM[2] : ''};
+  // Zahlungsreferenz: QR-Referenz (27 Ziffern) oder Creditor Reference (RF..)
+  let reference = '';
+  const qrr = t.match(/referenz[^\d]{0,25}((?:\d\s?){27})(?!\d)/i);
+  const scor = t.match(/\bRF\d{2}(?:\s?[0-9A-Z]{1,4}){1,6}\b/);
+  if (qrr) reference = qrr[1].replace(/\s/g, ''); else if (scor) reference = scor[0].replace(/\s/g, '');
+  // Empfänger-Adresse: auf dem QR-Einzahlungsschein stehen nach der IBAN Name, Strasse, PLZ Ort
+  const cred = {cName: '', cStreet: '', cHouse: '', cZip: '', cCity: ''};
+  if (ibanM) {
+    const lines = t.slice(ibanM.index + ibanM[0].length).split(/\n/).map(function (l) { return l.trim(); }).filter(Boolean).slice(0, 5);
+    for (let i = 0; i < lines.length; i++) {
+      const z = lines[i].match(/^(?:CH-)?(\d{4})\s+([A-Za-zÀ-ÿ .'\-]{2,35})$/);
+      if (z) {
+        cred.cZip = z[1]; cred.cCity = z[2].trim();
+        const st = i >= 1 ? lines[i - 1] : '';
+        const sm = st.match(/^(.*?)[\s,]+(\d+[a-zA-Z]?)$/);
+        if (sm) { cred.cStreet = sm[1]; cred.cHouse = sm[2]; } else cred.cStreet = st;
+        cred.cName = i >= 2 ? lines[i - 2] : (i === 1 ? lines[0] : '');
+        if (/^\d|referenz|zahlbar|betrag/i.test(cred.cName)) cred.cName = '';
+        break;
+      }
+    }
+  }
+  return {amount: best, due: due, iban: ibanM ? ibanM[0].replace(/\s/g, '') : '', invoiceNo: invM ? invM[2] : '', reference: reference,
+    cName: cred.cName, cStreet: cred.cStreet, cHouse: cred.cHouse, cZip: cred.cZip, cCity: cred.cCity};
 }
 
 function vendor_(from, body) {
