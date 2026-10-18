@@ -13,7 +13,7 @@
 const PROJECT_ID = 'mein-pdf-plan-manager';
 // Nur Mails von diesen Absendern importieren (eure privaten Adressen, von denen ihr weiterleitet).
 // Schutz vor Spam: Mails anderer Absender werden ignoriert. Leere Liste = alle Absender erlauben.
-const ALLOWED_FROM = ['ajdin.slijepcevic1@gmail.com'];
+const ALLOWED_FROM = ['ajdin.slijepcevic1@gmail.com', 'elma.h@hotmail.de'];
 const LABEL_DONE = 'Zuhause-importiert';
 const SEARCH = 'in:inbox -label:Zuhause-importiert newer_than:60d';
 
